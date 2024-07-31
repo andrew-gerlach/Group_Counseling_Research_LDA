@@ -4,11 +4,13 @@
 # clean_text: removes unwanted clauses, punctuation, common words, etc. from   #
 #     single string using replace and tree-tagger                              #
 # in:  x - string of text for cleaning                                         #
+#      tt.ex.path - path to tree-tagger executable                             #
+#      tt.par.path - path to tree-tagger parameter file                        #
 #      singularize - flag to singularize words in unknown_plurals.csv          #
 # out: y - cleaned list of words                                               #
 ################################################################################
 
-clean_text = function(x, singularize) {
+clean_text = function(x, tt.ex.path, tt.par.path, singularize) {
 
     if(missing(singularize)) { singularize = TRUE }
 
@@ -56,7 +58,7 @@ clean_text = function(x, singularize) {
 
     # Replace acronyms (don't love the space hacks, but want it before splitting
     # and tree-tagger), keep case for this step
-    acronyms = read.csv('~/Fellowship/LDA/acronyms.csv', header=FALSE)
+    acronyms = read.csv('acronyms.csv', header=FALSE)
     for(i in 1:nrow(acronyms)) {
         # first word
         x = str_replace_all(x,
@@ -72,7 +74,7 @@ clean_text = function(x, singularize) {
                             paste(' ', acronyms[i, 2], sep='')) }
 
     # Replace words (converts to lower case at this step)
-    words = read.csv('~/Fellowship/LDA/replacements.csv', header=FALSE)
+    words = read.csv('replacements.csv', header=FALSE)
     for(i in 1:nrow(words)) {
         # first word
         x = str_replace_all(tolower(x),
@@ -108,13 +110,13 @@ clean_text = function(x, singularize) {
     # that need to be singularized (e.g. microagressions)
     if(singularize) {
         # Singularize unknown plurals
-        plurals = read.csv('~/Fellowship/LDA/unknown_plurals.csv', header=FALSE)
+        plurals = read.csv('unknown_plurals.csv', header=FALSE)
         for(i in 1:length(x)) {
             if(x[i] %in% plurals$V1) { y$V2[i] = str_sub(x[i], start=1, end=-2) } }
     } else {
         # Make list of unknown words with 's' at end for singularizing
         plurals = unique(tolower(x[y$V2 == '<unknown>' & str_sub(x, start=-1) == 's']))
-        write.table(plurals, '~/Fellowship/LDA/unknown_plurals_tmp.csv', append=TRUE, row.names=FALSE, col.names=FALSE, quote=FALSE) }
+        write.table(plurals, 'unknown_plurals_tmp.csv', append=TRUE, row.names=FALSE, col.names=FALSE, quote=FALSE) }
 
     # Replace unknown words with their original
     y$V2[y$V2 == '<unknown>'] = tolower(x[y$V2 == '<unknown>'])
@@ -136,7 +138,7 @@ clean_text = function(x, singularize) {
     y = y %>% dplyr::filter(nchar(V2) > 1)
 
     # Remove specific words
-    words = read.csv('~/Fellowship/LDA/word_exclusion_list.csv', header=FALSE)
+    words = read.csv('word_exclusion_list.csv', header=FALSE)
     for(word in words$V1) {
         y = y %>% dplyr::filter(tolower(V2) != tolower(word)) }
 
@@ -211,6 +213,8 @@ create_wordcloud = function(x, k, t) {
 
     return(wc)
 
+}
+
 ################################################################################
 # plot_topic_charts: creates pie charts showing topic contrib. to each doc.    #
 # in:  x - LDA model                                                           #
@@ -249,7 +253,9 @@ plot_topic_charts = function(x) {
             z[j, i] = sum(y$gamma >= cutoffs[i] & y$gamma < cutoffs[i + 1] & y$topic == j) } }
     print(z)
 
-    return(g) }
+    return(g)
+
+}
 
 ################################################################################
 # topic_summary: calculates prevalence and (weighted) average year for topics  #
@@ -291,6 +297,47 @@ topic_summary = function(x, years) {
 }
 
 ################################################################################
+# plot_topic_charts: creates pie charts showing topic contrib. to each doc.    #
+# in:  x - LDA model                                                           #
+################################################################################
+
+plot_topic_charts = function(x) {
+
+    # Convert output to tibble
+    y = tidy(x, matrix='gamma')
+    # Define rows and cols for plot
+    y$row = NA
+    y$col = NA
+    y$document = as.numeric(y$document)
+    for(i in 1:16) {
+        y$row[as.numeric(y$document) > (i-1) * 17 & as.numeric(y$document) <= i * 17] = i
+        y$col[as.numeric(y$document) > (i-1) * 17 & as.numeric(y$document) <= i * 17] = 1:17 }
+    y$row[as.numeric(y$document) > 16 * 17] = 17
+    y$col[as.numeric(y$document) > 16 * 17] = 1:15
+    # Convert document and topics to factors
+    y$document = as.factor(y$document)
+    y$topic = as.factor(y$topic)
+
+    # Plot grid of pie charts
+    g = y %>% ggplot(aes(x=" ", y=gamma, group=topic, colour=topic, fill=topic)) +
+        geom_bar(width = 1, stat = "identity") +
+        coord_polar("y", start=0) +
+        facet_grid(rows=vars(row), col=vars(col)) +theme_void()
+
+    # Summarize topics in table
+    cutoffs = c(0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.01)
+    n = length(unique(y$topic))
+    z = matrix(NA, nrow=n, ncol=length(cutoffs) - 1)
+    for(i in 1:(length(cutoffs) - 1)) {
+        for(j in 1:n) {
+            z[j, i] = sum(y$gamma >= cutoffs[i] & y$gamma < cutoffs[i + 1] & y$topic == j) } }
+    print(z)
+
+    return(g)
+
+}
+
+################################################################################
 # print message or blank line if empty                                         #
 ################################################################################
 
@@ -299,5 +346,7 @@ print_msg = function(msg) {
     if(missing(msg)) {
         cat('\n')
     } else {
-        cat(paste(msg, '\n', sep='')) } }
+        cat(paste(msg, '\n', sep='')) }
+
+}
 
